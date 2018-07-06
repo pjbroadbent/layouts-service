@@ -1,15 +1,16 @@
 import {eSnapValidity, SnapTarget} from './Resolver';
 import {SnapGroup} from './SnapGroup';
+import {SnapWindow, WindowState} from './SnapWindow';
 import {Point, PointUtils} from './utils/PointUtils';
 
 const PREVIEW_SUCCESS = '#3D4059';
-const PREVIEW_SUCCESS_RESIZE = PREVIEW_SUCCESS;
 const PREVIEW_FAILURE = `repeating-linear-gradient(45deg, #3D4059, #3D4059 .25em, #C24629 0, #C24629 .5em)`;
 
 interface PreviewWindow {
     window: fin.OpenFinWindow;
     nativeWindow: Window|null;
     halfSize: Point;
+    snapWindow: SnapWindow|null;
 }
 
 /**
@@ -18,23 +19,26 @@ interface PreviewWindow {
  * Will create colored rectangles based on the given group. Rectangle color will be set according to snap validity.
  */
 export class SnapPreview {
-    private pool: {active: fin.OpenFinWindow[]; free: fin.OpenFinWindow[]};
+    /**
+     * Ensure we always have a number of free windows available. This should reduce lag when first moving a group.
+     */
+    private static INITIAL_FREE_WINDOWS = 3;
+
+    private pool: {active: PreviewWindow[]; free: PreviewWindow[]};
 
     private activeGroup: SnapGroup|null;
-    private activeWindowPreview: PreviewWindow|null;
-
-    // Just using a single window instance right now. Will update to use the pool at a later point.
-    private tempWindow: PreviewWindow;
-    private tempWindowIsActive: boolean;
+    private isValid: boolean;
 
     constructor() {
-        this.pool = {active: [], free: [/*this.createWindow()*/]};
+        this.pool = {active: [], free: []};
+
+        // Initialise pool with several free windows
+        for (let i = 0; i < SnapPreview.INITIAL_FREE_WINDOWS; i++) {
+            this.pool.free.push(this.createWindow(null));
+        }
 
         this.activeGroup = null;
-        this.activeWindowPreview = null;
-
-        this.tempWindow = this.createWindow();
-        this.tempWindowIsActive = false;
+        this.isValid = true;
     }
 
     /**
@@ -45,40 +49,44 @@ export class SnapPreview {
      */
     public show(target: SnapTarget): void {
         const activeGroup = target.activeWindow.getGroup();
-        const groupHalfSize = activeGroup.halfSize;  // TODO: Will need to change once 'activeGroup' can have multiple windows (SERVICE-128)
 
-        if (!this.tempWindowIsActive || this.activeGroup !== activeGroup) {
-            this.tempWindowIsActive = true;
-
-            this.tempWindow.window.show();
-            this.setWindowSize(this.tempWindow, groupHalfSize);
+        if (this.activeGroup !== activeGroup) {
+            this.hide();
         }
 
-        this.activeWindowPreview = this.tempWindow;
+        // if (this.activeGroup && this.pool.active.length !== this.activeGroup.windows.length) {
+        const activeWindows: PreviewWindow[] = this.pool.active;
+        const unusedPreviews: PreviewWindow[] = activeWindows.slice();
 
-        if (target.halfSize) {
-            // Resize window to the size chosen in the snap target
-            if (!PointUtils.isEqual(this.activeWindowPreview.halfSize, target.halfSize)) {
-                this.setWindowSize(this.activeWindowPreview, target.halfSize);
-            }
-        } else {
-            // Ensure the size of the preview matches the size of the window it represents
-            const halfSize = target.activeWindow.getState().halfSize;
+        // Ensure a preview window exists for each window in the active group
+        activeGroup.windows.forEach((activeWindow: SnapWindow) => {
+            const index = unusedPreviews.findIndex((preview: PreviewWindow) => preview.snapWindow === activeWindow);
 
-            if (!PointUtils.isEqual(this.activeWindowPreview.halfSize, halfSize)) {
-                this.setWindowSize(this.activeWindowPreview, halfSize);
-            }
-        }
-
-        this.setWindowPosition(this.tempWindow, activeGroup.center, groupHalfSize, target.snapOffset);
-        if (target.validity === eSnapValidity.VALID) {
-            if (PointUtils.isEqual(this.activeWindowPreview.halfSize, groupHalfSize)) {
-                this.activeWindowPreview.nativeWindow!.document.body.style.background = PREVIEW_SUCCESS;
+            if (index === -1) {
+                this.getOrCreateWindow(activeWindow);
             } else {
-                this.activeWindowPreview.nativeWindow!.document.body.style.background = PREVIEW_SUCCESS_RESIZE;
+                unusedPreviews.splice(index, 1);
             }
-        } else {
-            this.activeWindowPreview.nativeWindow!.document.body.style.background = PREVIEW_FAILURE;
+        });
+        unusedPreviews.forEach(preview => this.recycleWindow(preview));
+
+        // Ensure each preview window matches it's main window
+        activeWindows.forEach((preview: PreviewWindow) => {
+            const state: WindowState = preview.snapWindow!.getState();
+            const halfSize = target.halfSize && target.activeWindow === preview.snapWindow ? target.halfSize : state.halfSize;
+
+            if (!PointUtils.isEqual(preview.halfSize, halfSize)) {
+                this.setWindowSize(preview, halfSize);
+            }
+            this.setWindowPosition(preview, state.center, state.halfSize, target.snapOffset);
+        });
+
+        const isValid = target.validity === eSnapValidity.VALID;
+        if (this.isValid !== isValid) {
+            this.isValid = isValid;
+            this.pool.active.forEach((preview: PreviewWindow) => {
+                preview.nativeWindow!.document.body.style.background = isValid ? PREVIEW_SUCCESS : PREVIEW_FAILURE;
+            });
         }
 
         this.activeGroup = activeGroup;
@@ -88,17 +96,19 @@ export class SnapPreview {
      * Hides any visible preview windows. The window objects are hidden, but kept in a pool.
      */
     public hide(): void {
-        if (this.tempWindowIsActive) {
-            this.tempWindowIsActive = false;
-            this.tempWindow.window.hide();
-            this.activeGroup = null;
-        }
+        const activeWindows = this.pool.active.slice();
+
+        // Free all windows
+        activeWindows.forEach(preview => this.recycleWindow(preview));
+
+        // Reset active group
+        this.activeGroup = null;
     }
 
-    private createWindow(): PreviewWindow {
+    private createWindow(snapWindow: SnapWindow|null): PreviewWindow {
         const defaultHalfSize = {x: 160, y: 160};
         const options: fin.WindowOptions = {
-            name: 'previewWindow-',  // + Math.floor(Math.random() * 1000),
+            name: 'previewWindow-' + Math.floor(Math.random() * 1000),
             url: 'about:blank',
             defaultWidth: defaultHalfSize.x * 2,
             defaultHeight: defaultHalfSize.y * 2,
@@ -122,10 +132,40 @@ export class SnapPreview {
                     preview.nativeWindow.document.body.style.background = PREVIEW_SUCCESS;
                 }),
             nativeWindow: null,
-            halfSize: defaultHalfSize
+            halfSize: defaultHalfSize,
+            snapWindow
         };
 
         return preview;
+    }
+
+    private getOrCreateWindow(snapWindow: SnapWindow): PreviewWindow {
+        let preview: PreviewWindow|null = this.pool.free.pop() || null;
+
+        if (preview) {
+            preview.snapWindow = snapWindow;
+        } else {
+            preview = this.createWindow(snapWindow);
+        }
+
+        this.pool.active.push(preview);
+        preview.window.show();
+
+        return preview;
+    }
+
+    private recycleWindow(preview: PreviewWindow): void {
+        const activeWindows: PreviewWindow[] = this.pool.active;
+        const index = activeWindows.indexOf(preview);
+
+        if (index >= 0) {
+            preview.snapWindow = null;
+            preview.window.hide();
+            activeWindows.splice(index, 1);
+            this.pool.free.push(preview);
+        } else {
+            console.warn('Pool out of sync');
+        }
     }
 
     private setWindowSize(preview: PreviewWindow, halfSize: Point): void {
@@ -133,7 +173,7 @@ export class SnapPreview {
         preview.window.resizeTo(halfSize.x * 2, halfSize.y * 2, 'top-left');
 
         // Also update cached halfSize
-        PointUtils.assign(this.tempWindow.halfSize, halfSize);
+        PointUtils.assign(preview.halfSize, halfSize);
     }
 
     private setWindowPosition(preview: PreviewWindow, center: Point, halfSize: Point, snapOffset: Point): void {
