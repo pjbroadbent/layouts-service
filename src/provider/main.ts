@@ -79,8 +79,8 @@ async function registerService() {
 }
 
 export async function main() {
-    snapService = window.snapService = new SnapService();
     tabService = window.tabService = new TabService();
+    snapService = window.snapService = new SnapService();
     await win10Check;
     return await registerService();
 }
