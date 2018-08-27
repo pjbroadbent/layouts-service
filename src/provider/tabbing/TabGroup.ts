@@ -167,6 +167,7 @@ export class TabGroup {
      */
     public realignApps() {
         return Promise.all(this._tabs.map(tab => {
+            tab.window.leaveGroup();
             tab.window.alignPositionToTabGroup();
         }));
     }
@@ -254,7 +255,6 @@ export class TabGroup {
      */
     public async switchTab(ID: TabIdentifier, hideActiveTab = true): Promise<void> {
         const tab = this.getTab(ID);
-
         if (tab && tab !== this._activeTab) {
             await tab.window.showWindow();
             tab.window.finWindow.bringToFront();
@@ -263,6 +263,16 @@ export class TabGroup {
             }
             this.setActiveTab(tab);
         }
+    }
+
+
+    public async hideAllTabsMinusActiveTab() {
+        return Promise.all(this.tabs.map((tab) => {
+            if (tab.ID.name !== this.activeTab.ID.name && tab.ID.uuid !== this.activeTab.ID.uuid) {
+                return tab.window.hide();
+            }
+            return;
+        }));
     }
 
     /**
