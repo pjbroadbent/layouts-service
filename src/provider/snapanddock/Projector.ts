@@ -274,18 +274,11 @@ class BorderProjection implements Range {
     private addToRange(activeState: WindowState, candidateState: WindowState, distance: number): boolean {
         if (distance <= this.distance) {
             const opposite: Orientation = this.opposite;
-
-            if (Math.abs(activeState.center[opposite] - candidateState.center[opposite]) > activeState.halfSize[opposite] + candidateState.halfSize[opposite]) {
-                console.log('No overlap in ' + opposite + ' axis');
-                return true;
-            }
-
-            this.distance = distance;
-
             const min: number = candidateState.center[opposite] - candidateState.halfSize[opposite];
             const max: number = candidateState.center[opposite] + candidateState.halfSize[opposite];
             const isContiguous: boolean = this.min > this.max || RangeUtils.within(this, min) || RangeUtils.within(this, max);
 
+            this.distance = distance;
             if (isContiguous || this.windowBridgesRanges(activeState, RangeUtils.createFromRect(candidateState, this.opposite))) {
                 this.min = Math.min(this.min, min);
                 this.max = Math.max(this.max, max);

@@ -7,6 +7,7 @@ const outputDir = path.resolve(__dirname, './build');
 function createConfig(component, entryPoint, isLibrary, ...plugins) {
     const config = {
         entry: entryPoint,
+        devtool: 'sourcemap',
         output: {
             path: outputDir + '/' + component,
             filename: '[name]-bundle.js'

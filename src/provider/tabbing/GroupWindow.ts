@@ -4,6 +4,8 @@ import {TabGroup} from './TabGroup';
 import {TabService} from './TabService';
 import {TabWindow} from './TabWindow';
 
+export const DEFAULT_UI_URL = 'http://localhost:1337/provider/tabbing/tabstrip/tabstrip.html';
+
 /**
  * Handles the window for the Tab-Set
  */
@@ -42,15 +44,17 @@ export class GroupWindow extends AsyncWindow {
         super();
         this._tabGroup = tabGroup;
 
-        const windowOptionsSanitized: TabWindowOptions = {
-            url: windowOptions.url || 'http://localhost:1337/provider/tabbing/tabstrip/tabstrip.html',
+        this._initialWindowOptions = this._sanitizeTabWindowOptions(windowOptions);
+    }
+
+    private _sanitizeTabWindowOptions(windowOptions: TabWindowOptions) {
+        return {
+            url: windowOptions.url || undefined,
             width: windowOptions.width && !isNaN(windowOptions.width) ? windowOptions.width : undefined,
             height: windowOptions.height && !isNaN(windowOptions.height) ? windowOptions.height : 62,
             screenX: windowOptions.screenX && !isNaN(windowOptions.screenX) ? windowOptions.screenX : undefined,
             screenY: windowOptions.screenY && !isNaN(windowOptions.screenY) ? windowOptions.screenY : undefined
         };
-
-        this._initialWindowOptions = windowOptionsSanitized;
     }
 
     /**
@@ -70,8 +74,9 @@ export class GroupWindow extends AsyncWindow {
         const bounds = await app.getWindowBounds();
 
         const resizeTo = this._window.resizeTo(bounds.width!, this._initialWindowOptions.height!, 'top-left');
+        await app.resizeTo(bounds.width, bounds.height - this._initialWindowOptions.height!, 'bottom-left');
 
-        const moveTo = this._window.moveTo(bounds.left!, bounds.top! - this._initialWindowOptions.height!);
+        const moveTo = this._window.moveTo(bounds.left!, bounds.top!);
 
         await Promise.all([resizeTo, moveTo]);
         win.joinGroup(this._window!);
@@ -174,6 +179,15 @@ export class GroupWindow extends AsyncWindow {
         this._isMaximized = maximized;
     }
 
+
+    public updateInitialWindowOptions(update: TabWindowOptions) {
+        const sanitized = this._sanitizeTabWindowOptions(update);
+        this._initialWindowOptions.url = sanitized.url || this._initialWindowOptions.url;
+        this._initialWindowOptions.width = sanitized.width || this._initialWindowOptions.width;
+        this._initialWindowOptions.height = sanitized.height || this._initialWindowOptions.height;
+        this._initialWindowOptions.screenX = sanitized.screenX || this._initialWindowOptions.screenX;
+        this._initialWindowOptions.screenY = sanitized.screenY || this._initialWindowOptions.screenY;
+    }
     /**
      * Creates the tab set window using the window options passed in during initialization.
      */
@@ -183,7 +197,7 @@ export class GroupWindow extends AsyncWindow {
             const win = new fin.desktop.Window(
                 {
                     name: this._tabGroup.ID,
-                    url: this._initialWindowOptions.url,
+                    url: this._initialWindowOptions.url || DEFAULT_UI_URL,
                     autoShow: false,
                     frame: false,
                     maximizable: false,

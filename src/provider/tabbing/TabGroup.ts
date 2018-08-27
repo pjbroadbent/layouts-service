@@ -1,6 +1,6 @@
 import {TabApiEvents} from '../../client/APITypes';
 import {TabIdentifier, TabPackage, TabWindowOptions} from '../../client/types';
-
+import {Signal2} from '../snapanddock/Signal';
 import {GroupWindow} from './GroupWindow';
 import {Tab} from './Tab';
 import {TabService} from './TabService';
@@ -10,6 +10,25 @@ import {uuidv4} from './TabUtilities';
  * Handles functionality for the TabSet
  */
 export class TabGroup {
+    /**
+     * Indicates that a tab has been added to a tab set.
+     *
+     * The tabset the tab was added to could be new or existing. In the former case, a tabGroupAdded signal will be
+     * dispatched immediately before this one. If a tab is being moved from one tab set to another, there will be a
+     * tabRemoved signal dispatched, followed by a tabAdded signal.
+     */
+    public readonly tabAdded: Signal2<TabGroup, Tab> = new Signal2();
+
+    /**
+     * Indicates that a tab has been removed from a tab set.
+     *
+     * The tabset the tab was removed from could be destroyed as a result of this action (if the tab set now contains
+     * fewer that two tabs). In this case, a tabGroupRemoved signal will be dispatched immediately after this one. If a
+     * tab is being moved from one tab set to another, there will be a tabRemoved signal dispatched, followed by a
+     * tabAdded signal.
+     */
+    public readonly tabRemoved: Signal2<TabGroup, Tab> = new Signal2();
+
     /**
      * The ID for the TabGroup.
      */
@@ -43,8 +62,38 @@ export class TabGroup {
     /**
      * Initializes the async methods required for the TabGroup Class.
      */
-    public async init(): Promise<void> {
+    private async init(): Promise<void> {
+        // await this._window.init();
+    }
+
+    /**
+     * Initializes the tab group window.  This will initalize tabs in the group, show the window, and handle alignment.
+     */
+    private async _initializeTabGroup() {
         await this._window.init();
+        await this._redressTabsInGroup(true);
+        if (!this.window.initialWindowOptions.screenX && !this.window.initialWindowOptions.screenY) await this._window.alignPositionToApp(this._tabs[0].window);
+        this._window.show(false);
+        if (!this.window.initialWindowOptions.screenX && !this.window.initialWindowOptions.screenY) this.realignApps();
+    }
+
+
+    /**
+     * Initializes the group tabs for use with the group window.
+     * @param {boolean} goingToShow Are we about to show the group window?
+     */
+    private async _redressTabsInGroup(goingToShow: boolean) {
+        console.log('in redress');
+        // we are preparing to show the tab group;
+        if (goingToShow) {
+            await Promise.all(this._tabs.map((tab) => {
+                tab.init();
+            }));
+        } else {
+            await Promise.all(this._tabs.map((tab) => {
+                tab.deInit();
+            }));
+        }
     }
 
     /**
@@ -59,11 +108,6 @@ export class TabGroup {
         const existingTab = TabService.INSTANCE.getTab({uuid: tabPackage.tabID.uuid, name: tabPackage.tabID.name});
 
         if (existingTab) {
-            if (existingTab.tabGroup.window.initialWindowOptions.url !== this.window.initialWindowOptions.url) {
-                console.error('Cannot tab - mismatched group Urls!');
-                return;
-            }
-
             console.info('Existing tab attempting to be added.  Removing the first instance...');
 
             await existingTab.tabGroup.removeTab(existingTab.ID, false, true);
@@ -77,25 +121,43 @@ export class TabGroup {
             this._tabs.push(tab);
         }
 
-        await tab.init();
+        // Set the Custom UI if we are the first tab added.
+        if (this._tabs.length === 1) {
+            const firstTabConfig = TabService.INSTANCE.getAppUIConfig(tab.ID.uuid);
 
-        if (this._tabs.length > 1) {
-            tab.window.hideWindow();
-        } else {
-            tab.window.showWindow();
+            if (firstTabConfig) {
+                if (!this._window.initialWindowOptions.url) {
+                    this._window.updateInitialWindowOptions({url: firstTabConfig.url, height: firstTabConfig.height});
+                }
+            }
         }
 
+        if (this._tabs.length > 1) {
+            tab.window.hide();
+        }
+
+        if (this._tabs.length === 2) {
+            await this._initializeTabGroup();
+        } else if (this._tabs.length > 2) {
+            await tab.init();
+        }
+
+        // Moves the app window to the tab group window or viseversa.  If handleAlignment is false this must be handled externally
         if (handleAlignment) {
             if (this._tabs.length > 1) {
                 tab.window.alignPositionToTabGroup();
             } else {
-                this._window.alignPositionToApp(tab.window);
+                // this._window.alignPositionToApp(tab.window);
             }
         }
 
+        // Switch tab to set activeTab.  If handleTabSwitch false this must be handled externally.
         if (handleTabSwitch) {
             await this.switchTab(tab.ID);
+        } else {
+            await tab.window.hide();
         }
+        this.tabAdded.emit(this, tab);
 
         return tab;
     }
@@ -169,10 +231,17 @@ export class TabGroup {
         }
 
         await tab.remove(closeApp);
+        this.tabRemoved.emit(this, tab);
+
+        if (!closeApp) {
+            tab.deInit();
+        }
 
         if (closeGroupWindowCheck) {
-            if (this._tabs.length === 0) {
-                await TabService.INSTANCE.removeTabGroup(this.ID, true);
+            if (this._tabs.length === 1) {
+                await this._redressTabsInGroup(false);
+
+                await TabService.INSTANCE.removeTabGroup(this.ID, false);
                 return;
             }
         }
@@ -203,7 +272,7 @@ export class TabGroup {
     public removeAllTabs(closeApp: boolean): Promise<void[]> {
         const refArray = this._tabs.slice();
         const refArrayMap = refArray.map(tab => {
-            this.removeTab(tab.ID, closeApp, true);
+            this.removeTab(tab.ID, closeApp, true, false);
         });
 
         return Promise.all(refArrayMap);

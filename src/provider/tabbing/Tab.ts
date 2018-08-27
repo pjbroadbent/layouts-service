@@ -60,18 +60,25 @@ export class Tab {
     }
 
     /**
+     * Deinitializes the tab from tabbing.
+     */
+    public async deInit() {
+        await this._tabWindow.deInit();
+    }
+
+    /**
      * Remove the Tab from the group and possibly its window.
      * @param closeApp Flag if we should close the tabs window.
      */
     public async remove(closeApp: boolean) {
         this._tabWindow.leaveGroup();
 
-        if (closeApp) {
-            await this._tabWindow.close(false);
-        }
-
         fin.desktop.InterApplicationBus.send(fin.desktop.Application.getCurrent().uuid, this._tabGroup.ID, TabApiEvents.TABREMOVED, this._tabID);
         fin.desktop.InterApplicationBus.send(this.ID.uuid, this.ID.name, AppApiEvents.UNTABBED, {tabGroupID: this._tabGroup.ID});
+
+        if (closeApp) {
+            return this._tabWindow.close(false);
+        }
     }
 
     /**

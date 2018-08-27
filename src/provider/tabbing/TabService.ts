@@ -1,5 +1,6 @@
-import {Bounds, TabIdentifier, TabPackage, TabWindowOptions} from '../../client/types';
-
+import {ApplicationUIConfig, Bounds, TabIdentifier, TabWindowOptions} from '../../client/types';
+import {Signal1} from '../snapanddock/Signal';
+import {APIHandler} from './APIHandler';
 import {DragWindowManager} from './DragWindowManager';
 import {EventHandler} from './EventHandler';
 import {Tab} from './Tab';
@@ -19,6 +20,30 @@ export class TabService {
      * Handle of this Tab Service Instance.
      */
     public static INSTANCE: TabService;
+
+    /**
+     * Indicates that a new tab group has been created. This happens as the result of a user action that tabs two or
+     * more windows together. A tab group will only ever be created if there are at least two windows that need to be
+     * tabbed together.
+     *
+     * NOTE: At the point where this signal is dispatched the group will be empty. It will not be possible to determine
+     * which window(s) caused the creation of the tab group just from listening to this signal.
+     */
+    public readonly tabGroupAdded: Signal1<TabGroup> = new Signal1();
+    
+    /**
+     * Indicates that a new tab group has been removed from the service. This happens whenever a tab set is left with 
+     * fewer than two tabs. A tab group requires that there are always at least two windows within the tab group.
+     *
+     * NOTE: At the point where this signal is dispatched the group will be empty. It will not be possible to determine
+     * which window(s) were previously in the tab group just from listening to this signal.
+     */
+    public readonly tabGroupRemoved: Signal1<TabGroup> = new Signal1();
+
+    /**
+     * Handle to the Tabbing API Handler
+     */
+    public apiHandler: APIHandler;
 
     /**
      * Contains all the tabsets of this service.
@@ -45,21 +70,41 @@ export class TabService {
      */
     private _zIndexer: ZIndexer = new ZIndexer();
 
+    private _applicationUIConfigurations: ApplicationUIConfig[];
+
 
     /**
      * Constructor of the TabService Class.
      */
     constructor() {
         this._tabGroups = [];
+        this._applicationUIConfigurations = [];
         this._dragWindowManager = new DragWindowManager();
         this._dragWindowManager.init();
 
         this._eventHandler = new EventHandler(this);
+        this.apiHandler = new APIHandler(this);
 
         this.mTabApiEventHandler = new TabAPIActionProcessor(this);
         this.mTabApiEventHandler.init();
 
         TabService.INSTANCE = this;
+    }
+
+    public getAppUIConfig(uuid: string) {
+        const conf = this._applicationUIConfigurations.find(config => config.uuid === uuid);
+
+        if (conf) {
+            return conf.config;
+        }
+
+        return;
+    }
+
+    public addAppUIConfig(uuid: string, config: TabWindowOptions) {
+        if (!this.getAppUIConfig(uuid)) {
+            this._applicationUIConfigurations.push({uuid, config});
+        }
     }
 
     /**
@@ -69,9 +114,10 @@ export class TabService {
      */
     public async addTabGroup(windowOptions: TabWindowOptions): Promise<TabGroup> {
         const group = new TabGroup(windowOptions);
-        await group.init();
+        // await group.init();
 
         this._tabGroups.push(group);
+        this.tabGroupAdded.emit(group);
 
         return group;
     }
@@ -91,6 +137,7 @@ export class TabService {
             await group.window.close(true);
 
             this._tabGroups.splice(groupIndex, 1);
+            this.tabGroupRemoved.emit(group);
         }
     }
 
@@ -128,6 +175,31 @@ export class TabService {
 
         if (group) {
             return group.getTab(ID);
+        }
+
+        return;
+    }
+
+    /**
+     * Creates a new tab group with provided tabs.  Will use the UI and position of the first Identity provided for positioning.
+     * @param tabs An array of Identities to add to a group.
+     */
+    public async createTabGroupWithTabs(tabs: TabIdentifier[]) {
+        if (tabs.length === 0) {
+            return Promise.reject('Must provide at least 1 Tab Identifier');
+        }
+        const firstTab = tabs.shift();
+
+        if (!firstTab) {
+            return Promise.reject('Must provide at least 1 Tab Identifier');
+        }
+
+        const group = await this.addTabGroup({});
+
+        await group.addTab({tabID: firstTab});
+
+        for (const tab of tabs) {
+            await group.addTab({tabID: tab});
         }
 
         return;
