@@ -1,7 +1,7 @@
 import {Application} from 'hadouken-js-adapter';
 
 import {ApplicationUIConfig, Bounds, TabIdentifier, TabPackage, TabWindowOptions} from '../../client/types';
-
+import {Signal1} from '../snapanddock/Signal';
 import {APIHandler} from './APIHandler';
 import {ApplicationConfigManager} from './components/ApplicationConfigManager';
 import {DragWindowManager} from './DragWindowManager';
@@ -23,6 +23,25 @@ export class TabService {
      * Handle of this Tab Service Instance.
      */
     public static INSTANCE: TabService;
+
+    /**
+     * Indicates that a new tab group has been created. This happens as the result of a user action that tabs two or
+     * more windows together. A tab group will only ever be created if there are at least two windows that need to be
+     * tabbed together.
+     *
+     * NOTE: At the point where this signal is dispatched the group will be empty. It will not be possible to determine
+     * which window(s) caused the creation of the tab group just from listening to this signal.
+     */
+    public readonly tabGroupAdded: Signal1<TabGroup> = new Signal1();
+    
+    /**
+     * Indicates that a new tab group has been removed from the service. This happens whenever a tab set is left with 
+     * fewer than two tabs. A tab group requires that there are always at least two windows within the tab group.
+     *
+     * NOTE: At the point where this signal is dispatched the group will be empty. It will not be possible to determine
+     * which window(s) were previously in the tab group just from listening to this signal.
+     */
+    public readonly tabGroupRemoved: Signal1<TabGroup> = new Signal1();
 
     /**
      * Handle to the Tabbing API Handler
@@ -72,6 +91,7 @@ export class TabService {
     public addTabGroup(windowOptions: TabWindowOptions): TabGroup {
         const group = new TabGroup(windowOptions);
         this._tabGroups.push(group);
+        this.tabGroupAdded.emit(group);
 
         return group;
     }
@@ -91,6 +111,7 @@ export class TabService {
             await group.window.close(true);
 
             this._tabGroups.splice(groupIndex, 1);
+            this.tabGroupRemoved.emit(group);
         }
     }
 

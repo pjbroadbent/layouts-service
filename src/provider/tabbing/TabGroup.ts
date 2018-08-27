@@ -2,7 +2,7 @@ import {Provider} from 'hadouken-js-adapter/out/types/src/api/services/provider'
 
 import {TabApiEvents} from '../../client/APITypes';
 import {TabGroupEventPayload, TabIdentifier, TabPackage, TabWindowOptions} from '../../client/types';
-
+import {Signal2} from '../snapanddock/Signal';
 import {GroupWindow} from './GroupWindow';
 import {Tab} from './Tab';
 import {TabService} from './TabService';
@@ -12,6 +12,25 @@ import {uuidv4} from './TabUtilities';
  * Handles functionality for the TabSet
  */
 export class TabGroup {
+    /**
+     * Indicates that a tab has been added to a tab set.
+     *
+     * The tabset the tab was added to could be new or existing. In the former case, a tabGroupAdded signal will be
+     * dispatched immediately before this one. If a tab is being moved from one tab set to another, there will be a
+     * tabRemoved signal dispatched, followed by a tabAdded signal.
+     */
+    public readonly tabAdded: Signal2<TabGroup, Tab> = new Signal2();
+
+    /**
+     * Indicates that a tab has been removed from a tab set.
+     *
+     * The tabset the tab was removed from could be destroyed as a result of this action (if the tab set now contains
+     * fewer that two tabs). In this case, a tabGroupRemoved signal will be dispatched immediately after this one. If a
+     * tab is being moved from one tab set to another, there will be a tabRemoved signal dispatched, followed by a
+     * tabAdded signal.
+     */
+    public readonly tabRemoved: Signal2<TabGroup, Tab> = new Signal2();
+
     /**
      * The ID for the TabGroup.
      */
@@ -102,6 +121,7 @@ export class TabGroup {
         } else {
             await tab.window.hide();
         }
+        this.tabAdded.emit(this, tab);
 
         this.window.finWindow.bringToFront();
 
@@ -184,6 +204,7 @@ export class TabGroup {
         }
 
         await tab.remove(closeApp);
+        this.tabRemoved.emit(this, tab);        
         if (restoreWindowState) {
             tab.deInit();
         }

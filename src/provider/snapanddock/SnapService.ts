@@ -1,10 +1,12 @@
 import {Tab} from '../tabbing/Tab';
+import {TabGroup} from '../tabbing/TabGroup';
 import {TabService} from '../tabbing/TabService';
 import {getWindowAt} from '../tabbing/TabUtilities';
 
 import {eSnapValidity, Resolver, SnapTarget} from './Resolver';
 import {Signal2} from './Signal';
 import {SnapGroup} from './SnapGroup';
+import {SnapTabSet} from './SnapTabSet';
 import {SnapView} from './SnapView';
 import {eTransformType, Mask, SnapWindow, WindowIdentity, WindowState} from './SnapWindow';
 import {Point, PointUtils} from './utils/PointUtils';
@@ -42,6 +44,7 @@ export interface SnapState {
 export class SnapService {
     private windows: SnapWindow[];
     private groups: SnapGroup[];
+    private tabSets: SnapTabSet[];
 
     private resolver: Resolver;
     private view: SnapView;
@@ -67,6 +70,7 @@ export class SnapService {
     constructor() {
         this.windows = [];
         this.groups = [];
+        this.tabSets = [];
         this.resolver = new Resolver();
         this.view = new SnapView();
 
@@ -111,6 +115,11 @@ export class SnapService {
                     });
                 })
             .catch(console.error);
+
+        // Listen for tab group creation/destruction
+        const tabService: TabService = TabService.INSTANCE;
+        tabService.tabGroupAdded.add(this.onTabGroupAdded, this);
+        tabService.tabGroupRemoved.add(this.onTabGroupRemoved, this);
     }
 
     public undock(target: {uuid: string; name: string}): void {
@@ -261,6 +270,110 @@ export class SnapService {
         }
     }
 
+    private async onTabGroupAdded(group: TabGroup): Promise<void> {
+        console.error(`onTabGroupAdded(${group.ID})`);
+
+        if (!group.window.finWindow || !this.getTabSet(group, false)) {
+            // Create a wrapper around this group, to represent this tab set within the snap & dock service
+            const tabStrip: fin.OpenFinWindow = fin.desktop.Window.wrap('Layout-Manager', group.ID);
+            const tabSet: SnapTabSet = new SnapTabSet(group, this.addGroup(), tabStrip);
+            this.tabSets.push(tabSet);
+            group.tabAdded.add(this.onTabAdded, this);
+            group.tabRemoved.add(this.onTabRemoved, this);
+            console.log('Added tab set. Now ' + this.tabSets.length + ' tab sets');
+        } else {
+            console.warn('Snap service already has a tab set for a TabGroup that has only just been created');
+        }
+    }
+
+    private onTabGroupRemoved(group: TabGroup): void {
+        console.error(`onTabGroupRemoved(${group.ID})`);
+        const tabSet: SnapTabSet|undefined = this.getTabSet(group, true);
+
+        if (tabSet) {
+            // Sanity check
+            if (tabSet.getTabs().length > 0) {
+                console.warn('Removing a tab set that still has tabs within it');
+            }
+
+            // Tear-down tab set
+            group.tabAdded.add(this.onTabAdded, this);
+            group.tabRemoved.add(this.onTabRemoved, this);
+            this.tabSets.splice(this.tabSets.indexOf(tabSet), 1);
+            console.log('Removed tab set. Now ' + this.tabSets.length + ' tab sets');
+        }
+    }
+
+    private onTabAdded(group: TabGroup, tab: Tab): void {
+        console.error(`onTabAdded(${group.ID}, ${tab.window.finWindow && tab.window.finWindow.name})`);
+        const tabSet: SnapTabSet|undefined = this.getTabSet(group, true);
+        const tabWindow: SnapWindow|undefined = this.getSnapWindow(tab.window.finWindow);
+
+        if (tabSet && tabWindow) {
+            tabWindow.setGroup(tabSet.getGroup(), undefined, undefined, true);
+            tabSet.addTab(tab, tabWindow);
+        } else if (!tabWindow) {
+            console.warn('Couldn\'t find window for tab', tab);
+        }
+    }
+
+    private onTabRemoved(group: TabGroup, tab: Tab): void {
+        console.error(`onTabRemoved(${group.ID}, ${tab.window.finWindow && tab.window.finWindow.name})`);
+        const tabSet: SnapTabSet|undefined = this.getTabSet(group, true);
+        const tabWindow: SnapWindow|undefined = this.getSnapWindow(tab.window.finWindow);
+
+        if (tabSet && tabWindow) {
+            tabWindow.setGroup(this.addGroup());
+            tabSet.removeTab(tab, tabWindow);
+        } else if (!tabWindow) {
+            console.warn('Couldn\'t find window for tab', tab);
+        }
+    }
+
+    private getTabSet(tab: Tab|TabGroup, shouldExist: boolean): SnapTabSet|undefined {
+        const id = `Layout-Manager/${tab.ID}`;
+
+        if (!tab.window.finWindow || tab.window.finWindow.uuid === 'Layout-Manager') {
+            // Input is a tab strip, look-up tabset that has this window as it's tab strip
+            const tabSet: SnapTabSet|undefined = this.tabSets.find((tabSet: SnapTabSet) => {
+                return tabSet.getId() === id;
+            });
+
+            if (!tabSet && shouldExist) {
+                console.warn('No tab set with tabstrip: ', tab);
+            } else if (tabSet && !shouldExist) {
+                console.warn('Found tab set for given tabstrip when there should be none: ', tab);
+            }
+
+            return tabSet;
+        } else {
+            // Input is a tab within an existing tab set
+            const tabSet: SnapTabSet|undefined = this.tabSets.find((tabSet: SnapTabSet) => {
+                return tabSet.getTabs().some((tab: SnapWindow) => {
+                    return tab.getId() === id;
+                });
+            });
+
+            if (!tabSet && shouldExist) {
+                console.warn('No tabset that contains tab: ', tab);
+            } else if (tabSet && !shouldExist) {
+                console.warn('Found tabset containing tab when there shouldn\'t be one: ', tab);
+            }
+
+            return tabSet;
+        }
+    }
+
+    private getTabWindow(tab: TabGroup|Tab): SnapWindow|undefined {
+        const window: SnapWindow|undefined = this.getSnapWindow(tab.window.finWindow);
+
+        if (!window) {
+            console.warn('Window for tab/tabgroup not known to snapping service', tab);
+        }
+
+        return window;
+    }
+
     private onWindowGroupChanged(event: fin.WindowGroupChangedEvent) {
         // Each group operation will raise an event from every window involved. We should filter out to
         // only receive the one from the window being moved.
@@ -359,7 +472,7 @@ export class SnapService {
         const snapTarget: SnapTarget|null = this.resolver.getSnapTarget(this.groups, activeGroup);
 
         // SNAP WINDOWS
-        if (snapTarget && snapTarget.validity === eSnapValidity.VALID && (!(window as Window & {foo: boolean}).foo)) {
+        if (snapTarget && snapTarget.validity === eSnapValidity.VALID) {
             // Move all windows in activeGroup to snapTarget.group
             activeGroup.windows.forEach((window: SnapWindow) => {
                 if (window === snapTarget.activeWindow && snapTarget.halfSize) {

@@ -1,4 +1,5 @@
 import {Signal1, Signal2} from './Signal';
+import {SnapTabSet} from './SnapTabSet';
 import {eTransformType, Mask, SnapWindow, WindowState} from './SnapWindow';
 import {CalculatedProperty} from './utils/CalculatedProperty';
 import {Point} from './utils/PointUtils';
@@ -17,7 +18,15 @@ type TabData = {
 };
 
 interface TabState {
-    tabBar: SnapWindow;
+    /**
+     * Window for the tab strip that is created and owned by the service.
+     */
+    tabStrip: SnapWindow;
+
+    /**
+     * Pseudo-window that encapsulates the active tab and the tab strip as a single entity.
+     */
+    tabSet: SnapTabSet;
 
     /**
      * Maps SnapWindow ID's to the cached state for that window.
@@ -80,7 +89,8 @@ export class SnapGroup {
     private _halfSize: CalculatedProperty<Point>;
 
     private _id: number;
-    private _windows: SnapWindow[];
+    private _windows: SnapWindow[];        // List of windows within the group that should be used when snapping
+    private _tabbedWindows: SnapWindow[];  // List of windows within the group that do not contirbute to Snap & Dock calculations
 
     private rootWindow: SnapWindow|null;
 
@@ -88,14 +98,15 @@ export class SnapGroup {
      * If this is non-null then the windows in this group are tabbed, and so have some special behaviour.
      *
      * A group with n tabs will contain n+1 windows - the n applications that the user has "tabbed" together, amd an
-     * additional window that is created by the Snap & Dock service. This window acts as the tab bar - it will be a
+     * additional window that is created by the Layouts service. This window acts as the tab bar - it will be a
      * SnapWindow same as any other window, and other windows will also be able to snap to it.
      */
-    private tabData: TabData|null;
+    private tabData: TabState|null;
 
     constructor() {
         this._id = SnapGroup.nextId++;
         this._windows = [];
+        this._tabbedWindows = [];
         this.rootWindow = null;
         this.tabData = null;
 
@@ -131,10 +142,6 @@ export class SnapGroup {
         return this._windows.length;
     }
 
-    public get isTabGroup(): boolean {
-        return this.tabData !== null;
-    }
-
     public get windows(): SnapWindow[] {
         return this._windows.slice();
     }
@@ -151,7 +158,8 @@ export class SnapGroup {
             window.onModified.add(this.onWindowModified, this);
             window.onTransform.add(this.onWindowTransform, this);
             window.onCommit.add(this.onWindowCommit, this);
-            window.onClose.add(this.removeWindow, this);
+            window.onClose.add(this.onWindowClosed, this);
+            window.onTabSetChanged.add(this.onWindowTabSetChanged, this);
 
             // Setup hierarchy
             this._windows.push(window);
@@ -176,7 +184,8 @@ export class SnapGroup {
             window.onModified.remove(this.onWindowModified, this);
             window.onTransform.remove(this.onWindowTransform, this);
             window.onCommit.remove(this.onWindowCommit, this);
-            window.onClose.remove(this.removeWindow, this);
+            window.onClose.remove(this.onWindowClosed, this);
+            window.onTabSetChanged.remove(this.onWindowTabSetChanged, this);
 
             // Root may now have changed
             this.checkRoot();
@@ -235,6 +244,22 @@ export class SnapGroup {
 
     private onWindowClosed(window: SnapWindow): void {
         this.removeWindow(window);
+    }
+
+    private onWindowTabSetChanged(window: SnapWindow, tabSet: SnapTabSet|null): void {
+        if (tabSet) {
+            const index: number = this._windows.indexOf(window);
+            if (index >= 0) {
+                this._windows.splice(index, 1);
+                this._tabbedWindows.push(window);
+            }
+        } else {
+            const index: number = this._tabbedWindows.indexOf(window);
+            if (index >= 0) {
+                this._tabbedWindows.splice(index, 1);
+                this._windows.push(window);
+            }
+        }
     }
 
     private calculateProperties(): void {

@@ -1,5 +1,6 @@
 import {Signal1, Signal2} from './Signal';
 import {SnapGroup} from './SnapGroup';
+import {SnapTabSet} from './SnapTabSet';
 import {p} from './utils/async';
 import {isWin10} from './utils/platform';
 import {Point, PointUtils} from './utils/PointUtils';
@@ -108,6 +109,17 @@ export class SnapWindow {
      */
     public readonly onClose: Signal1<SnapWindow> = new Signal1();
 
+    /**
+     * This tab set this window belongs to has changed. This can happen when a window is added to a tabset, removed
+     * from a tabset, or moved from one tabset to another.
+     *
+     * The second argument of the signal is the tabset that the window will now belong to. There is no way to fetch the
+     * previous tabset. If the window is now no longer part of a tabset, the argument will be null.
+     *
+     * Arguments: (window: SnapWindow, tabSet: SnapTabSet|null)
+     */
+    public readonly onTabSetChanged: Signal2<SnapWindow, SnapTabSet|null> = new Signal2();
+
     private window: fin.OpenFinWindow;
     private state: WindowState;
 
@@ -115,7 +127,7 @@ export class SnapWindow {
     private id: string;  // Created from window uuid and name
     private group: SnapGroup;
     private prevGroup: SnapGroup|null;
-    private registered: boolean;
+    private tabSet: SnapTabSet|null;
 
     // State tracking for "synth move" detection
     private boundsChangeCountSinceLastCommit: number;
@@ -126,11 +138,11 @@ export class SnapWindow {
 
         this.identity = {uuid: window.uuid, name: window.name};
         this.id = `${window.uuid}/${window.name}`;
-        this.registered = true;
         this.boundsChangeCountSinceLastCommit = 0;
 
         this.group = group;
         this.prevGroup = null;
+        this.tabSet = null;
         group.addWindow(this);
 
         // Add listeners
@@ -220,6 +232,16 @@ export class SnapWindow {
                 this.snap();
             }
         }
+    }
+
+    public setTabSet(tabSet: SnapTabSet): void {
+        this.tabSet = tabSet;
+        this.onTabSetChanged.emit(this, tabSet);
+    }
+
+    public clearTabSet(): void {
+        this.tabSet = null;
+        this.onTabSetChanged.emit(this, null);
     }
 
     public getState(): WindowState {
