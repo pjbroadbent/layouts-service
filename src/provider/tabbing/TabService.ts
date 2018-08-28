@@ -1,5 +1,6 @@
-import {ApplicationUIConfig, Bounds, TabIdentifier, TabWindowOptions} from '../../client/types';
+import {ApplicationUIConfig, Bounds, TabIdentifier, TabServiceID, TabWindowOptions} from '../../client/types';
 import {Signal1} from '../snapanddock/Signal';
+
 import {APIHandler} from './APIHandler';
 import {DragWindowManager} from './DragWindowManager';
 import {EventHandler} from './EventHandler';
@@ -30,9 +31,9 @@ export class TabService {
      * which window(s) caused the creation of the tab group just from listening to this signal.
      */
     public readonly tabGroupAdded: Signal1<TabGroup> = new Signal1();
-    
+
     /**
-     * Indicates that a new tab group has been removed from the service. This happens whenever a tab set is left with 
+     * Indicates that a new tab group has been removed from the service. This happens whenever a tab set is left with
      * fewer than two tabs. A tab group requires that there are always at least two windows within the tab group.
      *
      * NOTE: At the point where this signal is dispatched the group will be empty. It will not be possible to determine
@@ -159,7 +160,9 @@ export class TabService {
      */
     public getTabGroupByApp(ID: TabIdentifier): TabGroup|undefined {
         return this._tabGroups.find((group: TabGroup) => {
-            return group.tabs.some((tab: Tab) => {
+            const isTabStrip = (ID.uuid === TabServiceID.UUID && ID.name === group.ID);
+
+            return isTabStrip || group.tabs.some((tab: Tab) => {
                 const tabID = tab.ID;
                 return tabID.name === ID.name && tabID.uuid === ID.uuid;
             });

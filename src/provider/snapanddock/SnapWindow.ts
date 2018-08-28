@@ -1,3 +1,5 @@
+import {TabServiceID} from '../../client/types';
+
 import {Signal1, Signal2} from './Signal';
 import {SnapGroup} from './SnapGroup';
 import {SnapTabSet} from './SnapTabSet';
@@ -120,14 +122,14 @@ export class SnapWindow {
      */
     public readonly onTabSetChanged: Signal2<SnapWindow, SnapTabSet|null> = new Signal2();
 
-    private window: fin.OpenFinWindow;
-    private state: WindowState;
+    protected window: fin.OpenFinWindow;
+    protected state: WindowState;
+    protected group: SnapGroup;
+    protected tabSet: SnapTabSet|null;
 
     private identity: WindowIdentity;
     private id: string;  // Created from window uuid and name
-    private group: SnapGroup;
     private prevGroup: SnapGroup|null;
-    private tabSet: SnapTabSet|null;
 
     // State tracking for "synth move" detection
     private boundsChangeCountSinceLastCommit: number;
@@ -232,6 +234,22 @@ export class SnapWindow {
     }
 
     /**
+     * Returns if this window is a tab strip that has been created by the service.
+     */
+    public isTabStrip(): boolean {
+        // Assume this is a tabstrip if it is a window owned by the service.
+        // There are other windows owned by the service, but none of those should be known to Snap & Dock
+        return this.identity.uuid === TabServiceID.UUID;
+    }
+
+    /**
+     * Returns if this window is a non-service window that is currently within a tab set.
+     */
+    public isTabbed(): boolean {
+        return !!this.tabSet;
+    }
+
+    /**
      * Moves this window into a different group. Has no effect if function is called with the group that this window
      * currently belongs to. This also handles removing the window from it's previous group.
      *
@@ -246,49 +264,59 @@ export class SnapWindow {
      * @param newHalfSize Can also simultaneously change the size of the window
      * @param synthetic Signifies that the setGroup has been triggered by a native group event. Will disable native group changes that would normally occur
      */
-    public setGroup(group: SnapGroup, offset?: Point, newHalfSize?: Point, synthetic?: boolean): void {
+    public async setGroup(group: SnapGroup, offset?: Point, newHalfSize?: Point, synthetic?: boolean): Promise<void> {
         if (group !== this.group) {
+            // Synhronously update model, move windows to new group
             this.prevGroup = this.group;
             this.group = group;
             group.addWindow(this);
 
+            // Asynchronously apply window actions - move to new position, then add windows to new window group
             if (!synthetic) {
-                this.unsnap();
+                if (!this.tabSet) {
+                    await this.unsnap();
+                }
+                await this.applyOffset(offset, newHalfSize, synthetic);
+                await this.snap();
+            } else {
+                await this.applyOffset(offset, newHalfSize, synthetic);
+            }
+        }
+    }
+
+    protected async applyOffset(offset?: Point, newHalfSize?: Point, synthetic?: boolean): Promise<void> {
+        if (offset || newHalfSize) {
+            const delta: Partial<WindowState> = {};
+
+            if (offset) {
+                delta.center = {x: this.state.center.x + offset.x, y: this.state.center.y + offset.y};
+            }
+            if (newHalfSize && !(this.isTabStrip() || this.tabSet)) {
+                delta.center = delta.center || {...this.state.center};
+                delta.halfSize = newHalfSize;
+
+                delta.center.x += newHalfSize.x - this.state.halfSize.x;
+                delta.center.y += newHalfSize.y - this.state.halfSize.y;
             }
 
-            if (offset || newHalfSize) {
-                const delta: Partial<WindowState> = {};
-
-                if (offset) {
-                    delta.center = {x: this.state.center.x + offset.x, y: this.state.center.y + offset.y};
-                }
-                if (newHalfSize) {
-                    delta.center = delta.center || {...this.state.center};
-                    delta.halfSize = newHalfSize;
-
-                    delta.center.x += newHalfSize.x - this.state.halfSize.x;
-                    delta.center.y += newHalfSize.y - this.state.halfSize.y;
-                }
-
-                this.applyState(delta, () => {
-                    if (!synthetic) {
-                        this.snap();
-                    }
-                });
-            } else if (group.windows.length >= 2 && !synthetic) {
-                this.snap();
-            }
+            await p<Partial<WindowState>, void>(this.applyState.bind(this))(delta);
         }
     }
 
     public setTabSet(tabSet: SnapTabSet): void {
         this.tabSet = tabSet;
         this.onTabSetChanged.emit(this, tabSet);
+        setTimeout(() => {
+            this.refreshOptions();
+        }, 500);
     }
 
     public clearTabSet(): void {
         this.tabSet = null;
         this.onTabSetChanged.emit(this, null);
+        setTimeout(() => {
+            this.refreshOptions();
+        }, 500);
     }
 
     public getState(): WindowState {
@@ -303,29 +331,40 @@ export class SnapWindow {
         this.window.moveBy(offset.x, offset.y);
     }
 
-    private snap(): void {
+    protected async snap(): Promise<void> {
         const windows: SnapWindow[] = this.group.windows;
         const count = windows.length;
         const index = windows.indexOf(this);
 
         if (count >= 2 && index >= 0) {
-            this.window.joinGroup(windows[index === 0 ? 1 : 0].window);
-
-            // Bring other windows in group to front
-            windows.forEach((groupWindow: SnapWindow) => {
-                if (groupWindow !== this) {
-                    groupWindow.window.bringToFront();
-                }
+            // Add window to group
+            await p<fin.OpenFinWindow, void>(this.window.joinGroup.bind(this.window))(windows[index === 0 ? 1 : 0].window).then(() => {
+                // Bring other windows in group to front
+                windows.forEach((groupWindow: SnapWindow) => {
+                    if (groupWindow !== this) {
+                        groupWindow.window.bringToFront();
+                    }
+                });
             });
         } else if (index === -1) {
             console.warn('Attempting to snap, but window isn\'t in the target group');
+            return Promise.reject();
         } else {
             console.warn('Need at least 2 windows in group to snap');
+            return Promise.reject();
         }
     }
 
-    private unsnap(): void {
-        this.window.leaveGroup();
+    protected unsnap(): Promise<void> {
+        return new Promise((resolve, reject) => {
+            this.window.leaveGroup(resolve, reject);
+        });
+    }
+
+    private refreshOptions(): void {
+        SnapWindow.getWindowState(this.window).then((state: WindowState) => {
+            this.updateState(state);
+        });
     }
 
     /**

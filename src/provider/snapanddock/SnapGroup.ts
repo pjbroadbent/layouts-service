@@ -177,10 +177,19 @@ export class SnapGroup {
     }
 
     private removeWindow(window: SnapWindow): void {
-        const index: number = this._windows.indexOf(window);
+        const windowIndex: number = this._windows.indexOf(window);
+        const tabIndex: number = this._tabbedWindows.indexOf(window);
 
-        if (index >= 0) {
-            this._windows.splice(index, 1);
+        if ((windowIndex >= 0) !== (tabIndex >= 0)) {
+            // Remove window from group
+            if (windowIndex >= 0) {
+                this._windows.splice(windowIndex, 1);
+            }
+            if (tabIndex >= 0) {
+                this._tabbedWindows.splice(tabIndex, 1);
+            }
+
+            // Clean-up
             window.onModified.remove(this.onWindowModified, this);
             window.onTransform.remove(this.onWindowTransform, this);
             window.onCommit.remove(this.onWindowCommit, this);
