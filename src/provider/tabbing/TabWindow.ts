@@ -45,11 +45,20 @@ export class TabWindow extends AsyncWindow {
      */
     public async init(): Promise<void> {
         [this._initialWindowOptions, this._initialWindowBounds] = await Promise.all([this.getWindowOptions(), this.getWindowBounds()]);
+        this._createWindowEventListeners();
+        // @ts-ignore resizeRegion.sides is valid.  Its not in the type file.
+        return this.updateWindowOptions({showTaskbarIcon: false, frame: false, resizeRegion: {sides: {top: false}}});
+    }
+
+    /**
+     * deinitializes the async methods required for the TabWindow class.
+     */
+    public async deInit(): Promise<void> {
+        const bounds = await this.getWindowBounds();
+        await this._window.resizeTo(bounds.width, bounds.height + this._tabGroup.window.initialWindowOptions.height!, 'bottom-left');
 
         // @ts-ignore resizeRegion.sides is valid.  Its not in the type file.
-        this.updateWindowOptions({showTaskbarIcon: false, frame: false, resizeRegion: {sides: {top: false}}});
-
-        this._createWindowEventListeners();
+        return this.updateWindowOptions({showTaskbarIcon: true, frame: true, resizeRegion: {sides: {top: true}}});
     }
 
     /**
@@ -76,8 +85,9 @@ export class TabWindow extends AsyncWindow {
      * Aligns the position of this tab window to the position of the tab set group window.
      */
     public async alignPositionToTabGroup(): Promise<void> {
+        this._window.leaveGroup();
         const groupWindow = this._tab.tabGroup.window;
-        const groupActiveTab = this._tab.tabGroup.activeTab;
+        const groupActiveTab = this._tab.tabGroup.activeTab || this._tabGroup.tabs[0];
 
         const tabGroupBoundsP = groupWindow.getWindowBounds();
         const tabBoundsP = groupActiveTab ? groupActiveTab.window.getWindowBounds() : this.getWindowBounds();
@@ -110,8 +120,6 @@ export class TabWindow extends AsyncWindow {
         this._window.addEventListener('closed', this._onClose.bind(this));
 
         // this._window.addEventListener("focused", this._onFocus.bind(this));
-
-        this._window.addEventListener('bounds-changed', this._onBoundsChanged.bind(this));
     }
 
     /**

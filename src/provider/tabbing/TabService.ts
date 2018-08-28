@@ -27,11 +27,6 @@ export class TabService {
     public apiHandler: APIHandler;
 
     /**
-     * Reference to any application UI configurations set via setTabClient API
-     */
-    private _applicationUIConfigs: ApplicationUIConfig[];
-
-    /**
      * Contains all the tabsets of this service.
      */
     private _tabGroups: TabGroup[];
@@ -56,14 +51,15 @@ export class TabService {
      */
     private _zIndexer: ZIndexer = new ZIndexer();
 
+    private _applicationUIConfigurations: ApplicationUIConfig[];
+
 
     /**
      * Constructor of the TabService Class.
      */
     constructor() {
         this._tabGroups = [];
-        this._applicationUIConfigs = [];
-
+        this._applicationUIConfigurations = [];
         this._dragWindowManager = new DragWindowManager();
         this._dragWindowManager.init();
 
@@ -76,6 +72,22 @@ export class TabService {
         TabService.INSTANCE = this;
     }
 
+    public getAppUIConfig(uuid: string) {
+        const conf = this._applicationUIConfigurations.find(config => config.uuid === uuid);
+
+        if (conf) {
+            return conf.config;
+        }
+
+        return;
+    }
+
+    public addAppUIConfig(uuid: string, config: TabWindowOptions) {
+        if (!this.getAppUIConfig(uuid)) {
+            this._applicationUIConfigurations.push({uuid, config});
+        }
+    }
+
     /**
      * Creates a new tab group
      * @param {TabWindowOptions} WindowOptions Window Options used to create the tab group window (positions, dimensions, url, etc...)
@@ -83,32 +95,11 @@ export class TabService {
      */
     public async addTabGroup(windowOptions: TabWindowOptions): Promise<TabGroup> {
         const group = new TabGroup(windowOptions);
-        await group.init();
+        // await group.init();
 
         this._tabGroups.push(group);
 
         return group;
-    }
-
-    /**
-     * Finds an applications UI Configuration, if present.
-     * @param {string} uuid The UUID of the application we are searching for.
-     */
-    public getAppUIConfig(uuid: string) {
-        return this._applicationUIConfigs.find((config) => {
-            return config.uuid === uuid;
-        });
-    }
-
-    /**
-     * Adds a custom UI configuration for an applications tab strip.
-     * @param uuid UUID of the application to add.
-     * @param config Configuration of the applications UI
-     */
-    public addAppUIConfig(uuid: string, config: ApplicationUIConfig) {
-        if (!this.getAppUIConfig(uuid)) {
-            this._applicationUIConfigs.push(config);
-        }
     }
 
     /**
@@ -164,6 +155,26 @@ export class TabService {
         if (group) {
             return group.getTab(ID);
         }
+
+        return;
+    }
+
+    /**
+     * Creates a new tab group with provided tabs.  Will use the UI and position of the first Identity provided for positioning.
+     * @param tabs An array of Identities to add to a group.
+     */
+    public async createTabGroupWithTabs(tabs: TabIdentifier[]) {
+        if (tabs.length === 0) {
+            return Promise.reject('Must provide at least 1 Tab Identifier');
+        }
+        const group = await this.addTabGroup({});
+
+
+        for (const tab of tabs) {
+            await group.addTab({tabID: tab});
+        }
+
+        group.realignApps();
 
         return;
     }
