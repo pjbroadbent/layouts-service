@@ -123,7 +123,7 @@ export class SnapService {
     }
 
     public undock(target: {uuid: string; name: string}): void {
-        const window: SnapWindow|undefined = this.getSnapWindow(target);
+        const window: SnapWindow|null = this.getSnapWindow(target);
 
         if (window) {
             try {
@@ -152,7 +152,7 @@ export class SnapService {
     }
 
     public deregister(target: {uuid: string; name: string}): void {
-        const window: SnapWindow|undefined = this.getSnapWindow(target);
+        const window: SnapWindow|null = this.getSnapWindow(target);
 
         if (window) {
             try {
@@ -307,7 +307,7 @@ export class SnapService {
     private onTabAdded(group: TabGroup, tab: Tab): void {
         console.error(`onTabAdded(${group.ID}, ${tab.window.finWindow && tab.window.finWindow.name})`);
         const tabSet: SnapTabSet|undefined = this.getTabSet(group, true);
-        const tabWindow: SnapWindow|undefined = this.getSnapWindow(tab.window.finWindow);
+        const tabWindow: SnapWindow|null = this.getSnapWindow(tab.window.finWindow);
 
         if (tabSet && tabWindow) {
             tabWindow.setGroup(tabSet.getGroup(), undefined, undefined, true);
@@ -320,7 +320,7 @@ export class SnapService {
     private onTabRemoved(group: TabGroup, tab: Tab): void {
         console.error(`onTabRemoved(${group.ID}, ${tab.window.finWindow && tab.window.finWindow.name})`);
         const tabSet: SnapTabSet|undefined = this.getTabSet(group, true);
-        const tabWindow: SnapWindow|undefined = this.getSnapWindow(tab.window.finWindow);
+        const tabWindow: SnapWindow|null = this.getSnapWindow(tab.window.finWindow);
 
         if (tabSet && tabWindow) {
             tabWindow.setGroup(this.addGroup());
@@ -364,16 +364,6 @@ export class SnapService {
         }
     }
 
-    private getTabWindow(tab: TabGroup|Tab): SnapWindow|undefined {
-        const window: SnapWindow|undefined = this.getSnapWindow(tab.window.finWindow);
-
-        if (!window) {
-            console.warn('Window for tab/tabgroup not known to snapping service', tab);
-        }
-
-        return window;
-    }
-
     private onWindowGroupChanged(event: fin.WindowGroupChangedEvent) {
         // Each group operation will raise an event from every window involved. We should filter out to
         // only receive the one from the window being moved.
@@ -381,12 +371,11 @@ export class SnapService {
             return;
         }
 
-
         console.log('Revieved window group changed event: ', event);
         const sourceWindow = this.getSnapWindow({uuid: event.sourceWindowAppUuid, name: event.sourceWindowName});
 
         if (sourceWindow) {
-            if (event.reason === 'leave') {
+            if (event.reason === 'leave' || event.reason === 'disband') {
                 sourceWindow.setGroup(this.addGroup(), undefined, undefined, true);
             } else {
                 const targetWindow = this.getSnapWindow({uuid: event.targetWindowAppUuid, name: event.targetWindowName});
@@ -404,7 +393,7 @@ export class SnapService {
                             // already native grouped.
                             .forEach((snapWin) => {
                                 // Ignore any undefined results (i.e. windows unknown to the service)
-                                if (snapWin !== undefined) {
+                                if (snapWin !== null) {
                                     snapWin.setGroup(targetWindow.getGroup(), undefined, undefined, true);
                                 }
                             });
@@ -495,12 +484,14 @@ export class SnapService {
 
             // Ignore if we are dragging around a tabset
             if (!TabService.INSTANCE.getTabGroupByApp(currentDragWindowIdentity)) {
-                const windowUnderPoint = getWindowAt(activeState.center.x, activeState.center.y, currentDragWindowIdentity);
+                const windowUnderPoint: WindowIdentity|null = getWindowAt(activeState.center.x, activeState.center.y, currentDragWindowIdentity);
+                const snapWindowUnderPoint: SnapWindow|null = windowUnderPoint && this.getSnapWindow(windowUnderPoint);
 
                 // There is a window under our drop point
-                if (windowUnderPoint) {
-                    if (TabService.INSTANCE.applicationConfigManager.compareConfigBetweenApplications(windowUnderPoint.uuid, currentDragWindowIdentity.uuid)) {
-                        const tabGroupUnderPoint = TabService.INSTANCE.getTabGroupByApp(windowUnderPoint);
+                if (snapWindowUnderPoint && (snapWindowUnderPoint.getGroup().length < 2 || snapWindowUnderPoint.isTabbed())) {
+                    if (TabService.INSTANCE.applicationConfigManager.compareConfigBetweenApplications(windowUnderPoint!.uuid, currentDragWindowIdentity.uuid)) {
+                        const tabGroupUnderPoint = TabService.INSTANCE.getTabGroupByApp(windowUnderPoint!);
+
                         // The window under drop point is a tab group
                         if (tabGroupUnderPoint) {
                             // Add Tab
@@ -514,7 +505,7 @@ export class SnapService {
                                 });
                         } else {
                             // If not a tab group then create a group with the 2 tabs.
-                            TabService.INSTANCE.createTabGroupWithTabs([windowUnderPoint, currentDragWindowIdentity]);
+                            TabService.INSTANCE.createTabGroupWithTabs([windowUnderPoint!, currentDragWindowIdentity]);
                         }
                     }
                 }
@@ -542,7 +533,7 @@ export class SnapService {
         return totalOffset;
     }
 
-    private getSnapWindow(finWindow: WindowIdentity) {
-        return this.windows.find(w => w.getIdentity().uuid === finWindow.uuid && w.getIdentity().name === finWindow.name);
+    private getSnapWindow(finWindow: WindowIdentity): SnapWindow|null {
+        return this.windows.find(w => w.getIdentity().uuid === finWindow.uuid && w.getIdentity().name === finWindow.name) || null;
     }
 }
