@@ -48,9 +48,8 @@ export class EventHandler {
      * @param name The name of the application to initialise tabbing on
      */
     private async _onClientInit(message: TabWindowOptions, uuid: string, name: string): Promise<void> {
-        // initializeTabbing(message, uuid, name, this._service);
         if (message.url) {
-            this._service.addAppUIConfig(uuid, message);
+            this._service.applicationConfigManager.addApplicationUIConfig(uuid, message);
         }
     }
 

@@ -1,6 +1,9 @@
+import {Application} from 'hadouken-js-adapter';
+
 import {ApplicationUIConfig, Bounds, TabIdentifier, TabPackage, TabWindowOptions} from '../../client/types';
 
 import {APIHandler} from './APIHandler';
+import {ApplicationConfigManager} from './components/ApplicationConfigManager';
 import {DragWindowManager} from './DragWindowManager';
 import {EventHandler} from './EventHandler';
 import {Tab} from './Tab';
@@ -51,15 +54,16 @@ export class TabService {
      */
     private _zIndexer: ZIndexer = new ZIndexer();
 
-    private _applicationUIConfigurations: ApplicationUIConfig[];
-
+    /**
+     * Handles the application ui configs
+     */
+    private mApplicationConfigManager: ApplicationConfigManager;
 
     /**
      * Constructor of the TabService Class.
      */
     constructor() {
         this._tabGroups = [];
-        this._applicationUIConfigurations = [];
         this._dragWindowManager = new DragWindowManager();
         this._dragWindowManager.init();
 
@@ -68,6 +72,8 @@ export class TabService {
 
         this.mTabApiEventHandler = new TabAPIActionProcessor(this);
         this.mTabApiEventHandler.init();
+
+        this.mApplicationConfigManager = new ApplicationConfigManager();
 
         TabService.INSTANCE = this;
     }
@@ -95,8 +101,6 @@ export class TabService {
      */
     public addTabGroup(windowOptions: TabWindowOptions): TabGroup {
         const group = new TabGroup(windowOptions);
-        // await group.init();
-
         this._tabGroups.push(group);
 
         return group;
@@ -176,17 +180,14 @@ export class TabService {
         if (firstTab) {
             const bounds = await firstTab.window.getWindowBounds();
             tabsP.forEach(tab => tab.window.finWindow.setBounds(bounds.left, bounds.top, bounds.width, bounds.height));
+            tabsP[tabsP.length - 1].window.finWindow.bringToFront();
             await group.addTab(firstTab, false);
         }
 
         await Promise.all(tabsP.map(tab => group.addTab(tab, false)));
 
-        // for (const tabIDs of tabs) {
-        //     await group.addTab(tab);
-        // }
         await group.switchTab(tabs[tabs.length - 1]);
         await group.hideAllTabsMinusActiveTab();
-        // group.realignApps();
 
         return;
     }
@@ -263,5 +264,13 @@ export class TabService {
      */
     public get tabGroups(): TabGroup[] {
         return this._tabGroups;
+    }
+
+    /**
+     * Returns the application config manager
+     * @returns {ApplicationConfigManager} The container that holds the tab window options bound to the
+     */
+    public get applicationConfigManager(): ApplicationConfigManager {
+        return this.mApplicationConfigManager;
     }
 }

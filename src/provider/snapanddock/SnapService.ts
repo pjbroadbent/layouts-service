@@ -1,6 +1,6 @@
 import {Tab} from '../tabbing/Tab';
 import {TabService} from '../tabbing/TabService';
-import {compareTabGroupUIs, getWindowAt} from '../tabbing/TabUtilities';
+import {getWindowAt} from '../tabbing/TabUtilities';
 
 import {eSnapValidity, Resolver, SnapTarget} from './Resolver';
 import {Signal2} from './Signal';
@@ -349,7 +349,7 @@ export class SnapService {
 
                 // There is a window under our drop point
                 if (windowUnderPoint) {
-                    if (compareTabGroupUIs(windowUnderPoint.uuid, currentDragWindowIdentity.uuid)) {
+                    if (TabService.INSTANCE.applicationConfigManager.compareConfigBetweenApplications(windowUnderPoint.uuid, currentDragWindowIdentity.uuid)) {
                         const tabGroupUnderPoint = TabService.INSTANCE.getTabGroupByApp(windowUnderPoint);
                         // The window under drop point is a tab group
                         if (tabGroupUnderPoint) {
