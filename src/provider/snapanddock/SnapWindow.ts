@@ -230,7 +230,9 @@ export class SnapWindow {
                     await this.unsnap();
                 }
                 await this.applyOffset(offset, newHalfSize, synthetic);
-                await this.snap();
+                if (group.length > 1) {
+                    await this.snap();
+                }
             } else {
                 await this.applyOffset(offset, newHalfSize, synthetic);
             }

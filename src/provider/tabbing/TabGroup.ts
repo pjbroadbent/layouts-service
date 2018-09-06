@@ -204,7 +204,7 @@ export class TabGroup {
         }
 
         await tab.remove(closeApp);
-        this.tabRemoved.emit(this, tab);        
+        this.tabRemoved.emit(this, tab);
         if (restoreWindowState) {
             tab.deInit();
         }

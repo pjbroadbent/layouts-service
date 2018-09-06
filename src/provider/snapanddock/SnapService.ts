@@ -275,7 +275,7 @@ export class SnapService {
 
         if (!group.window.finWindow || !this.getTabSet(group, false)) {
             // Create a wrapper around this group, to represent this tab set within the snap & dock service
-            const tabStrip: fin.OpenFinWindow = fin.desktop.Window.wrap('Layout-Manager', group.ID);
+            const tabStrip: fin.OpenFinWindow = fin.desktop.Window.wrap('layouts-service', group.ID);
             const tabSet: SnapTabSet = new SnapTabSet(group, this.addGroup(), tabStrip);
             this.tabSets.push(tabSet);
             group.tabAdded.add(this.onTabAdded, this);
@@ -331,9 +331,9 @@ export class SnapService {
     }
 
     private getTabSet(tab: Tab|TabGroup, shouldExist: boolean): SnapTabSet|undefined {
-        const id = `Layout-Manager/${tab.ID}`;
+        const id = `layouts-service/${tab.ID}`;
 
-        if (!tab.window.finWindow || tab.window.finWindow.uuid === 'Layout-Manager') {
+        if (!tab.window.finWindow || tab.window.finWindow.uuid === 'layouts-service') {
             // Input is a tab strip, look-up tabset that has this window as it's tab strip
             const tabSet: SnapTabSet|undefined = this.tabSets.find((tabSet: SnapTabSet) => {
                 return tabSet.getId() === id;
