@@ -37,7 +37,9 @@ export class DesktopModel {
         // Listen for any new windows created and register them with the service
         fin.desktop.System.addEventListener('window-created', (event: fin.WindowBaseEvent) => {
             // Ignore child windows of the service itself (e.g. preview windows)
-            if (event.uuid !== serviceUUID) {
+            console.log('event.name', event.name);
+            console.log('event.name.indexOf(Placeholder-) === 0', event.name.indexOf('Placeholder-') === 0);
+            if (event.uuid !== serviceUUID || event.name.indexOf('Placeholder-') === 0) {
                 this.registerWindow(event.uuid, event.name);
             }
         });

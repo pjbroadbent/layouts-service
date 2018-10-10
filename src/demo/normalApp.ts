@@ -1,8 +1,38 @@
 import {Identity} from 'hadouken-js-adapter';
 import {_Window} from 'hadouken-js-adapter/out/types/src/api/window/window';
 
-import {Layout, LayoutApp} from '../client/types';
-import {positionWindow} from '../provider/workspaces/utils';
+import {Layout, LayoutApp, WindowState} from '../client/types';
+
+// Positions a window when it is restored.
+// If the window is supposed to be tabbed, makes it leave its group to avoid tab collision bugs
+// Also given to the client to use.
+const positionWindow = async (win: WindowState) => {
+    try {
+        const ofWin = await fin.Window.wrap(win);
+        if (!win.isTabbed) {
+            await ofWin.leaveGroup();
+        }
+        await ofWin.setBounds(win);
+
+
+        // COMMENTED OUT FOR DEMO
+        if (win.state === 'normal') {
+            await ofWin.restore();
+        } else if (win.state === 'minimized') {
+            await ofWin.minimize();
+        } else if (win.state === 'maximized') {
+            await ofWin.maximize();
+        }
+
+        if (win.isShowing) {
+            await ofWin.show();
+        } else {
+            await ofWin.hide();
+        }
+    } catch (e) {
+        console.error('position window error', e);
+    }
+};
 
 export interface Workspace {
     id: string;
