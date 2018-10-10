@@ -122,9 +122,9 @@ export class TabService {
         const group: DesktopTabGroup|null = tabToRemove && tabToRemove.getTabGroup();
 
         if (!tabToRemove || !group) {
-            throw new Error(`No tab group found for ${toRemove}`);
+            throw new Error(`No tab group found for ${toRemove.uuid} - ${toRemove.name}`);
         } else if (!tabToAdd) {
-            throw new Error(`No window found for ${toAdd}`);
+            throw new Error(`No window found for ${toAdd.uuid} - ${toAdd.name}`);
         }
 
         return group.swapTab(tabToRemove, tabToAdd);
@@ -180,6 +180,8 @@ export class TabService {
                 width: blob.groupInfo.dimensions.width,
             };
 
+            const appHeight = blob.groupInfo.dimensions.appHeight;
+
             // Each tab set will be a stand-alone snap group
             const snapGroup: DesktopSnapGroup = new DesktopSnapGroup();
 
@@ -191,8 +193,8 @@ export class TabService {
             if (tabs.length >= 2) {
                 // Position first tab (positions of tabstrip and subsequent tabs will all be based on this)
                 const bounds: Rectangle = {
-                    center: {x: newTabWindowOptions.x + (newTabWindowOptions.width / 2), y: newTabWindowOptions.y + (newTabWindowOptions.height / 2)},
-                    halfSize: {x: newTabWindowOptions.width / 2, y: newTabWindowOptions.height / 2}
+                    center: {x: newTabWindowOptions.x + (newTabWindowOptions.width / 2), y: newTabWindowOptions.y + (appHeight / 2)},
+                    halfSize: {x: newTabWindowOptions.width / 2, y: appHeight / 2}
                 };
                 await tabs[0].applyProperties(bounds);
 
