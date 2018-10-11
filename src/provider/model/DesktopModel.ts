@@ -1,6 +1,7 @@
 import {Window} from 'hadouken-js-adapter';
 
 import {DesktopSnapGroup} from '../model/DesktopSnapGroup';
+import {SignalSlot} from '../Signal';
 import {Point} from '../snapanddock/utils/PointUtils';
 import {RectUtils} from '../snapanddock/utils/RectUtils';
 
@@ -115,6 +116,54 @@ export class DesktopModel {
                 throw new Error(`Unable to deregister from service - no window is registered with identity "${target.uuid}/${target.name}"`);
             }
         }
+    }
+
+    /**
+     * Waits for a window with the given identity to be registered, then returns the DesktopWindow object for that
+     * window. If the window already exists at the point where this function is called, the promise is resolved
+     * immediately.
+     *
+     * By default the promise will time-out after a short delay, and the promise will be rejected. Set a timeout of
+     * zero to wait indefinitely.
+     *
+     * @param identity The window that we are waiting to be registered
+     * @param timeout How long we should wait, in milliseconds
+     */
+    public expect(identity: WindowIdentity, timeout = 1000): Promise<DesktopWindow> {
+        let slot: SignalSlot|null = null;
+        const windowPromise: Promise<DesktopWindow> = new Promise((resolve, reject) => {
+            const window: DesktopWindow|null = this.getWindow(identity);
+            const id = this.getId(identity);
+
+            if (window) {
+                resolve(window);
+            } else {
+                slot = DesktopWindow.onCreated.add((window: DesktopWindow) => {
+                    if (window.getId() === id) {
+                        slot!.remove();
+                        resolve(window);
+                    }
+                });
+            }
+        });
+
+        let promiseWithTimeout: Promise<DesktopWindow>;
+        if (timeout > 0) {
+            // Wait at-most 'timeout' milliseconds
+            promiseWithTimeout = Promise.race([windowPromise, new Promise<DesktopWindow>((res, rej) => setTimeout(rej, timeout))]);
+        } else {
+            // Wait indefinitely
+            promiseWithTimeout = windowPromise;
+        }
+
+        // Ensure we remove callback when promise resolves/rejects
+        const removeSlot = (window: DesktopWindow) => {
+            if (slot) {
+                slot.remove();
+            }
+            return window;
+        };
+        return promiseWithTimeout.then(removeSlot, removeSlot);
     }
 
     private async registerWindow(uuid: string, name: string): Promise<void> {
