@@ -3,15 +3,17 @@ import {Window} from 'hadouken-js-adapter';
 import {TabServiceID} from '../../client/types';
 import {apiHandler} from '../main';
 import {Signal1, Signal2} from '../Signal';
+import {Direction} from '../snapanddock/Resolver';
 import {p, promiseMap} from '../snapanddock/utils/async';
 import {isWin10} from '../snapanddock/utils/platform';
-import {Point} from '../snapanddock/utils/PointUtils';
-import {Rectangle} from '../snapanddock/utils/RectUtils';
+import {Point, PointUtils} from '../snapanddock/utils/PointUtils';
+import {Rectangle, RectUtils} from '../snapanddock/utils/RectUtils';
 
 import {DesktopEntity} from './DesktopEntity';
 import {DesktopModel} from './DesktopModel';
 import {DesktopSnapGroup, Snappable} from './DesktopSnapGroup';
 import {DesktopTabGroup} from './DesktopTabGroup';
+import {MouseTracker} from './MouseTracker';
 
 export interface WindowState extends Rectangle {
     center: Point;
@@ -99,9 +101,46 @@ enum ActionOrigin {
 
 type OpenFinWindowEventHandler = <K extends keyof fin.OpenFinWindowEventMap>(event: fin.OpenFinWindowEventMap[K]) => void;
 
+interface DragState {
+    isResize: boolean;
+    anchor: Direction;
+    offset: Point;
+    timer: number;
+    initialBounds: Rectangle;
+}
+
+/**
+ * Determines how the service handles the 'Show window contents while dragging' performance option.
+ *
+ * When this option is disabled, work-arounds are required to ensure that the service remains functional.
+ */
+export enum DragMode {
+    /**
+     * No special handling or simulation of drag events.
+     *
+     * This option should be used if-and-only-if the 'Show window contents while dragging' option is enabled (as is the
+     * default on most environments).
+     */
+    NORMAL,
+
+    /**
+     * Simulate drag events, but don't apply the calculated bounds to the application window
+     */
+    PREVIEW_ONLY,
+
+    /**
+     * Simulate drag events, and apply the resulting bounds to the application window.
+     *
+     * This produces an effect that is pretty close to having the 'Show window contents while dragging' optione enabled.
+     */
+    PREVIEW_AND_WINDOW
+}
+
 export class DesktopWindow extends DesktopEntity implements Snappable {
     public static readonly onCreated: Signal1<DesktopWindow> = new Signal1();
     public static readonly onDestroyed: Signal1<DesktopWindow> = new Signal1();
+    public static dragMode: DragMode = DragMode.NORMAL;
+    private static dragState: DragState|null = null;
 
     public static async getWindowState(window: Window): Promise<WindowState> {
         return Promise.all([window.getOptions(), window.isShowing(), window.getBounds()])
@@ -255,6 +294,7 @@ export class DesktopWindow extends DesktopEntity implements Snappable {
         this.applicationState = {...initialState};
         this.modifiedState = {};
         this.temporaryState = {};
+
         this.snapGroup = group;
         this.tabGroup = null;
         this.prevGroup = null;
@@ -279,6 +319,7 @@ export class DesktopWindow extends DesktopEntity implements Snappable {
             this.window!.leaveGroup();
         }
         this.cleanupListeners();
+
         this.onTeardown.emit(this);
         DesktopWindow.onDestroyed.emit(this);
         this.ready = false;
@@ -664,6 +705,8 @@ export class DesktopWindow extends DesktopEntity implements Snappable {
 
     private addListeners(): void {
         this.registerListener('begin-user-bounds-changing', this.handleBeginUserBoundsChanging.bind(this));
+        this.registerListener('end-user-bounds-changing', this.handleStopDragAction.bind(this));
+        this.registerListener('blurred', this.handleStopDragAction.bind(this));
         this.registerListener('bounds-changed', this.handleBoundsChanged.bind(this));
         this.registerListener('bounds-changing', this.handleBoundsChanging.bind(this));
         this.registerListener('closed', this.handleClosed.bind(this));
@@ -706,6 +749,24 @@ export class DesktopWindow extends DesktopEntity implements Snappable {
         this.registerListener('shown', () => this.updateState({hidden: false}, ActionOrigin.APPLICATION));
     }
 
+    private getAnchor(mousePos: Point, resizeRegion: {size?: number; bottomRightCorner?: number;}): Direction {
+        const edgeSize = resizeRegion.size || 2;
+        const cornerSize = resizeRegion.bottomRightCorner || 4;
+        const {center, halfSize} = this.windowState;
+        const distance: Point = {x: halfSize.x - Math.abs(mousePos.x - center.x), y: halfSize.y - Math.abs(mousePos.y - center.y)};
+
+        if (mousePos.x > center.x && mousePos.y > center.y && distance.x <= cornerSize && distance.y <= cornerSize) {
+            // In bottom-right corner resize region
+            return {x: 1, y: 1};
+        } else {
+            // Frameless move, or edge/corner resize
+            return {
+                x: distance.x < edgeSize ? Math.sign(mousePos.x - center.x) as 1 | -1 : 0,
+                y: distance.y < edgeSize ? Math.sign(mousePos.y - center.y) as 1 | -1 : 0
+            };
+        }
+    }
+
     private registerListener<K extends keyof fin.OpenFinWindowEventMap>(eventType: K, handler: (event: fin.OpenFinWindowEventMap[K]) => void) {
         this.window!.addListener(eventType, handler);
         this.registeredListeners.set(eventType, handler);
@@ -727,7 +788,6 @@ export class DesktopWindow extends DesktopEntity implements Snappable {
         const center: Point = {x: bounds.left + halfSize.x, y: bounds.top + halfSize.y};
 
         this.updateState({center, halfSize}, ActionOrigin.APPLICATION);
-
         if (this.userInitiatedBoundsChange) {
             // Convert 'changeType' into our enum type
             const type: Mask<eTransformType> = event.changeType + 1;
@@ -758,6 +818,61 @@ export class DesktopWindow extends DesktopEntity implements Snappable {
 
     private handleBeginUserBoundsChanging(event: fin.WindowBoundsEvent) {
         this.userInitiatedBoundsChange = true;
+
+        if (DesktopWindow.dragMode === DragMode.PREVIEW_ONLY || DesktopWindow.dragMode === DragMode.PREVIEW_AND_WINDOW) {
+            const mouseTracker: MouseTracker = this.model.getMouseTracker();
+
+            Promise.all([mouseTracker.getPositionAsync(), this.window!.getOptions()]).then((result: [Point, fin.WindowOptions]) => {
+                const [mousePos, options] = result;
+                const anchor: Direction = this.getAnchor(mousePos, options.resizeRegion!);
+                let offset: Point = PointUtils.difference(mousePos, this.windowState.center);
+
+                const isResize = anchor.x !== 0 || anchor.y !== 0;
+                if (isResize) {
+                    offset.x = mousePos.x - (this.windowState.center.x + (this.windowState.halfSize.x * anchor.x));
+                    offset.y = mousePos.y - (this.windowState.center.y + (this.windowState.halfSize.y * anchor.y));
+                } else {
+                    const finCenter = {x: event.left + (event.width / 2), y: event.top + (event.height / 2)};
+                    offset = PointUtils.difference(mousePos, finCenter);
+                }
+
+                const tick = async () => {
+                    const mousePos: Point = await mouseTracker.getPositionAsync();
+                    let bounds: Rectangle;
+
+                    if (DesktopWindow.dragState) {
+                        const initial = DesktopWindow.dragState.initialBounds;
+                        bounds = {center: {x: 0, y: 0}, halfSize: {x: 0, y: 0}};
+                        if (isResize) {
+                            bounds.halfSize.x = DesktopWindow.dragState.anchor.x ?
+                                (Math.abs(mousePos.x - (initial.center.x - (anchor.x * initial.halfSize.x)) - offset.x) / 2) :
+                                initial.halfSize.x;
+                            bounds.halfSize.y = DesktopWindow.dragState.anchor.y ?
+                                (Math.abs(mousePos.y - (initial.center.y - (anchor.y * initial.halfSize.y)) - offset.y) / 2) :
+                                initial.halfSize.y;
+                            bounds.center.x = initial.center.x + ((bounds.halfSize.x - initial.halfSize.x) * anchor.x);
+                            bounds.center.y = initial.center.y + ((bounds.halfSize.y - initial.halfSize.y) * anchor.y);
+                        } else {
+                            bounds = {center: {x: mousePos.x + offset.x, y: mousePos.y + offset.y}, halfSize: this.windowState.halfSize};
+                        }
+
+                        this.updateState(bounds, ActionOrigin.SERVICE);
+                    }
+                };
+
+                if (!DesktopWindow.dragState) {
+                    // tslint:disable-next-line:no-any
+                    DesktopWindow.dragState = {isResize, anchor, offset, initialBounds: RectUtils.clone(this.windowState), timer: setInterval(tick, 16) as any};
+                }
+            });
+        }
+    }
+
+    private handleStopDragAction(): void {
+        if (DesktopWindow.dragState) {
+            clearInterval(DesktopWindow.dragState.timer);
+            DesktopWindow.dragState = null;
+        }
     }
 
     private handleClosed(): void {
