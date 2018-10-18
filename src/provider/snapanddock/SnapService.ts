@@ -68,7 +68,7 @@ export class SnapService {
     public undock(target: WindowIdentity): void {
         const window: DesktopWindow|null = this.model.getWindow(target);
 
-        if (window && window.getSnapGroup().length > 1) {
+        if (window && window.getSnapGroup().length > 1 && !window.getTabGroup()) {
             try {
                 // Calculate undock offset
                 const offset = this.calculateUndockMoveDirection(window);
@@ -113,9 +113,11 @@ export class SnapService {
         }
 
         try {
+            // Don't explode any tabbed windows
+            const windows: Snappable[] = group.windows.filter((window: Snappable) => !window.getTabGroup());
+
             // Exploding only makes sense if there is more than one window in the group.
-            if (group && group.length > 1) {
-                const windows = group.windows;
+            if (windows.length > 1) {
                 // Determine the offset for each window before modifying and window state
                 const offsets: Point[] = [];
                 // group.center is recalculated on each call, so we assign it here once and use the value.
