@@ -856,7 +856,12 @@ export class DesktopWindow extends DesktopEntity implements Snappable {
                             bounds = {center: {x: mousePos.x + offset.x, y: mousePos.y + offset.y}, halfSize: this.windowState.halfSize};
                         }
 
-                        this.updateState(bounds, ActionOrigin.SERVICE);
+                        if (DesktopWindow.dragMode === DragMode.PREVIEW_AND_WINDOW) {
+                            this.updateState(bounds, ActionOrigin.SERVICE);
+                        } else {
+                            this.updateState(bounds, ActionOrigin.APPLICATION);
+                            this.onTransform.emit(this, isResize ? eTransformType.RESIZE : eTransformType.MOVE);
+                        }
                     }
                 };
 
