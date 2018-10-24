@@ -749,7 +749,13 @@ export class DesktopWindow extends DesktopEntity implements Snappable {
         this.registerListener('shown', () => this.updateState({hidden: false}, ActionOrigin.APPLICATION));
     }
 
-    private getAnchor(mousePos: Point, resizeRegion: {size?: number; bottomRightCorner?: number;}): Direction {
+    private getAnchor(mousePos: Point, options: fin.WindowOptions): Direction {
+        if (options.resizable === false) {
+            // Window is non-resizable, so this must be a 'move' operation
+            return {x: 0, y: 0};
+        }
+
+        const resizeRegion: {size?: number; bottomRightCorner?: number} = options.resizeRegion || {};
         const edgeSize = resizeRegion.size || 2;
         const cornerSize = resizeRegion.bottomRightCorner || 4;
         const {center, halfSize} = this.windowState;
@@ -824,13 +830,15 @@ export class DesktopWindow extends DesktopEntity implements Snappable {
 
             Promise.all([mouseTracker.getPositionAsync(), this.window!.getOptions()]).then((result: [Point, fin.WindowOptions]) => {
                 const [mousePos, options] = result;
-                const anchor: Direction = this.getAnchor(mousePos, options.resizeRegion!);
-                let offset: Point = PointUtils.difference(mousePos, this.windowState.center);
+                const anchor: Direction = this.getAnchor(mousePos, options);
+                const isResize: boolean = (anchor.x !== 0 || anchor.y !== 0);
+                let offset: Point;
 
-                const isResize = anchor.x !== 0 || anchor.y !== 0;
                 if (isResize) {
-                    offset.x = mousePos.x - (this.windowState.center.x + (this.windowState.halfSize.x * anchor.x));
-                    offset.y = mousePos.y - (this.windowState.center.y + (this.windowState.halfSize.y * anchor.y));
+                    offset = {
+                        x: mousePos.x - (this.windowState.center.x + (this.windowState.halfSize.x * anchor.x)),
+                        y: mousePos.y - (this.windowState.center.y + (this.windowState.halfSize.y * anchor.y))
+                    };
                 } else {
                     const finCenter = {x: event.left + (event.width / 2), y: event.top + (event.height / 2)};
                     offset = PointUtils.difference(mousePos, finCenter);
