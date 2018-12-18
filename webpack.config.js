@@ -21,6 +21,9 @@ const outputDir = path.resolve(__dirname, './dist');
  *      Defaults to empty list
  */
 function createConfig(outPath, entryPoint, options, ...plugins) {
+    //Do not add '-bundle' suffix to anything within the client
+    const filename = outPath.includes("client") ? '[name].js' : '[name]-bundle.js';
+
     const config = {
         entry: entryPoint,
         optimization: {
@@ -28,7 +31,7 @@ function createConfig(outPath, entryPoint, options, ...plugins) {
         },
         output: {
             path: outPath,
-            filename: '[name]-bundle.js'
+            filename
         },
         resolve: {
             extensions: ['.ts', '.tsx', '.js']
