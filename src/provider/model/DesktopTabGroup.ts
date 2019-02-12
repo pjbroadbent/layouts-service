@@ -614,8 +614,8 @@ export class DesktopTabGroup implements DesktopEntity {
 
     private async updateGroupConstraints(): Promise<void> {
         const result: Point<ResizeConstraint> = {
-            x: {minSize: 0, maxSize: Number.MAX_SAFE_INTEGER, resizableMin: true, resizableMax: true},
-            y: {minSize: 0, maxSize: Number.MAX_SAFE_INTEGER, resizableMin: true, resizableMax: true}
+            x: {minSize: 0, maxSize: DesktopWindow.NO_CONSTRAINT, resizableMin: true, resizableMax: true},
+            y: {minSize: 0, maxSize: DesktopWindow.NO_CONSTRAINT, resizableMin: true, resizableMax: true}
         };
 
         for (const tab of this.tabs) {

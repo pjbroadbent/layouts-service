@@ -98,8 +98,8 @@ testParameterized(
     }));
 
 const defaultConstraints: Required<Constraints> = {
-    maxHeight: -1,
-    maxWidth: -1,
+    maxHeight: 1000000000,
+    maxWidth: 1000000000,
     minHeight: 0,
     minWidth: 0,
     resizable: true,
@@ -138,9 +138,9 @@ function constraintsUnion(...windowConstraints: Constraints[]): Required<Constra
     result.minWidth = Math.max(...windowConstraints.map(constraint => constraint.minWidth || 0));
     result.minHeight = Math.max(...windowConstraints.map(constraint => constraint.minHeight || 0));
     result.maxWidth =
-        Math.min(...windowConstraints.map(constraint => (!constraint.maxWidth || constraint.maxWidth < 0) ? Number.MAX_SAFE_INTEGER : constraint.maxWidth));
+        Math.min(...windowConstraints.map(constraint => (!constraint.maxWidth || constraint.maxWidth < 0) ? 1000000000 : constraint.maxWidth));
     result.maxHeight =
-        Math.min(...windowConstraints.map(constraint => (!constraint.maxHeight || constraint.maxHeight < 0) ? Number.MAX_SAFE_INTEGER : constraint.maxHeight));
+        Math.min(...windowConstraints.map(constraint => (!constraint.maxHeight || constraint.maxHeight < 0) ? 1000000000 : constraint.maxHeight));
 
     result.resizable = windowConstraints.map(constraint => constraint.resizable || constraint.resizable === undefined).every(val => val);
 

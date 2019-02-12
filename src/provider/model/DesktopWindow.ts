@@ -107,12 +107,21 @@ export class DesktopWindow implements DesktopEntity {
     public static readonly onDestroyed: Signal1<DesktopWindow> = new Signal1();
 
     /**
+     * When a window has no max width/height constraint, we will constrain the window to a large arbitrary number.
+     * 
+     * Using this number (over -1 or other 'flag' value) simplifies calculations. This number is also used when 
+     * "removing" size constraints from windows, though there are some known issues with this method. See 
+     * RUN-5010 for details.
+     */
+    public static NO_CONSTRAINT: number = 1000000000;
+
+    /**
      * Tracks which windows are currently being manipulated as part of a transaction.
      *
      * This is used to identify and ignore group-changed events triggered by intermediate steps
      * of the transaction which may lead to out-of-sync state and general instability.
      */
-    public static activeTransactions: Transaction[] = [];
+    private static activeTransactions: Transaction[] = [];
 
     public static async getWindowState(window: Window): Promise<EntityState> {
         return Promise.all([window.getOptions(), window.isShowing(), window.getBounds()])
@@ -138,13 +147,13 @@ export class DesktopWindow implements DesktopEntity {
                         resizableMin: !!options.resizable && (options.resizeRegion.sides.left !== false),
                         resizableMax: !!options.resizable && (options.resizeRegion.sides.right !== false),
                         minSize: options.minWidth || 0,
-                        maxSize: options.maxWidth && options.maxWidth > 0 ? options.maxWidth : Number.MAX_SAFE_INTEGER,
+                        maxSize: options.maxWidth && options.maxWidth > 0 ? options.maxWidth : DesktopWindow.NO_CONSTRAINT,
                     },
                     y: {
                         resizableMin: !!options.resizable && (options.resizeRegion.sides.top !== false),
                         resizableMax: !!options.resizable && (options.resizeRegion.sides.bottom !== false),
                         minSize: options.minHeight || 0,
-                        maxSize: options.maxHeight && options.maxHeight > 0 ? options.maxHeight : Number.MAX_SAFE_INTEGER,
+                        maxSize: options.maxHeight && options.maxHeight > 0 ? options.maxHeight : DesktopWindow.NO_CONSTRAINT,
                     }
                 };
 
@@ -394,8 +403,8 @@ export class DesktopWindow implements DesktopEntity {
             title: '',
             showTaskbarIcon: true,
             resizeConstraints: {
-                x: {minSize: 0, maxSize: Number.MAX_SAFE_INTEGER, resizableMin: true, resizableMax: true},
-                y: {minSize: 0, maxSize: Number.MAX_SAFE_INTEGER, resizableMin: true, resizableMax: true}
+                x: {minSize: 0, maxSize: DesktopWindow.NO_CONSTRAINT, resizableMin: true, resizableMax: true},
+                y: {minSize: 0, maxSize: DesktopWindow.NO_CONSTRAINT, resizableMin: true, resizableMax: true}
             },
             opacity: 1,
             alwaysOnTop: false,
