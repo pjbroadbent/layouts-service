@@ -24,6 +24,7 @@
     "build:dev": "webpack --mode development",
     "watch": "webpack --watch --mode development",
     "generate": "node scripts/generateCode.js",
+    "sandbox": "node scripts/sandbox.js",
     "zip": "node scripts/createProviderZip.js",
     "start": "node server.js"
   },

@@ -1,12 +1,10 @@
 const {launch, connect} = require('hadouken-js-adapter');
 const express = require('express');
-const webpack = require('webpack');
-const webpackDevMiddleware = require('webpack-dev-middleware');
 const os = require('os');
-const path = require('path');
 
-const {PORT, SERVICE_NAME, CDN_LOCATION} = require('./scripts/server/config');
-const {createCustomManifestMiddleware, getProviderUrl, readJsonFile} = require('./scripts/server/spawn');
+const {PORT} = require('./scripts/server/config');
+const {createAppJsonMiddleware, createWebpackMiddleware, createCustomManifestMiddleware} = require('./scripts/server/middleware');
+const {getProviderUrl} = require('./scripts/server/middleware');
 
 
 /**
@@ -100,7 +98,7 @@ async function createServer() {
     app.use(/\/?(.*app\.json)/, createAppJsonMiddleware());
 
     // Add endpoint for creating new application manifests from scratch - used within demo app for lauching 'custom' applications
-    app.use('/manifest', createCustomManifestMiddleware());
+    app.use('/manifest', createCustomManifestMiddleware(mode, writeToDisk));
 
     // Add route for serving static resources
     app.use(express.static('res'));
@@ -115,109 +113,4 @@ async function createServer() {
     }
 
     return app;
-}
-
-
-/**
- * Simple command-line parser. Returns the named argument from the list of process arguments.
- * 
- * @param {string} name Argument name, including any hyphens
- * @param {boolean} hasValue If this argument requires a value. Accepts "--name value" and "--name=value" syntax.
- * @param {any} defaultValue Determines return value, if an argument with the given name doesn't exist. Only really makes sense when 'hasValue' is true.
- */
-function getArg(name, hasValue, defaultValue = hasValue ? null : false) {
-    const unusedArgs = global.unusedArgs = (global.unusedArgs || process.argv.slice(2).map(arg => arg.toLowerCase()));
-    let value = defaultValue;
-    let argIndex = unusedArgs.indexOf(name.toLowerCase());
-
-    if (argIndex >= 0 && argIndex < unusedArgs.length - (hasValue ? 1 : 0)) {
-        if (hasValue) {
-            // Take the argument after this as being the value
-            value = unusedArgs[argIndex + 1];
-            unusedArgs.splice(argIndex, 2);
-        } else {
-            // Only consume the one argument
-            value = true;
-            unusedArgs.splice(argIndex, 1);
-        }
-    } else if (hasValue) {
-        argIndex = unusedArgs.findIndex((arg) => arg.indexOf(name + '=') === 0);
-        if (argIndex >= 0) {
-            value = unusedArgs[argIndex].substr(unusedArgs[argIndex].indexOf('=') + 1);
-            unusedArgs.splice(argIndex, 1);
-        }
-    }
-
-    return value;
-}
-
-/**
- * Creates express-compatible middleware function that will add/replace any URL's found within app.json files according
- * to the command-line options of this utility.
- */
-function createAppJsonMiddleware() {
-    return async (req, res, next) => {
-        const configPath = req.params[0];           // app.json path, relative to 'res' dir
-        const component = configPath.split('/')[0]; // client, provider or demo
-
-        // Parse app.json
-        const config = await readJsonFile(path.resolve('res', configPath)).catch(next);
-        const serviceDefinition = (config.services || []).find(service => service.name === SERVICE_NAME);
-        const startupUrl = config.startup_app && config.startup_app.url;
-
-        // Edit manifest
-        if (startupUrl) {
-            // Replace startup app with HTML served locally
-            config.startup_app.url = startupUrl.replace(CDN_LOCATION, `http://localhost:${PORT}/${component}`);
-        }
-        if (serviceDefinition) {
-            // Replace provider manifest URL with the requested version
-            serviceDefinition.manifestUrl = getProviderUrl(providerVersion, serviceDefinition.manifestUrl);
-        }
-
-        // Return modified JSON to client
-        res.header('Content-Type', 'application/json; charset=utf-8');
-        res.send(JSON.stringify(config, null, 4));
-    };
-}
-
-/**
- * Creates express-compatible middleware function to serve webpack modules.
- * 
- * Wrapper will immediately terminate the server if the initial build fails.
- * 
- * This is a wrapper around the webpack-dev-middleware utility.
- */
-async function createWebpackMiddleware() {
-    return new Promise((resolve) => {
-        // Load config and set development mode
-        const config = require('./webpack.config.js');
-        config.forEach(entry => entry.mode = (entry.mode || mode));
-
-        // Create express middleware
-        const compiler = webpack(config);
-        const middleware = webpackDevMiddleware(compiler, {
-            publicPath: '/',
-            writeToDisk
-        });
-
-        // Wait until initial build has finished before starting application
-        const startTime = Date.now();
-        middleware.waitUntilValid((result) => {
-            // Output build times
-            const buildTimes = result.stats.map(stats => {
-                const component = path.relative('./dist', stats.compilation.outputOptions.path);
-                return `${component}: ${(stats.endTime - stats.startTime) / 1000}s`;
-            });
-            console.log(`\nInitial build complete after ${(Date.now() - startTime) / 1000} seconds\n    ${buildTimes.join('\n    ')}\n`);
-
-            // Check build status
-            if (result.stats.find(stats => stats.compilation.errors.length > 0)) {
-                console.error('Build failed. See output above.');
-                process.exit(1);
-            } else {
-                resolve(middleware);
-            }
-        });
-    });
 }
